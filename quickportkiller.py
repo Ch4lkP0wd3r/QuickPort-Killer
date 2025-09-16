@@ -70,7 +70,7 @@ def kill(pid, timeout=3, verbose=False):
 
 def main():
     p = argparse.ArgumentParser(description="kill proc using a port")
-    g = p.add_mutually_exclusive_group(required=True)
+    g = p.add_mutually_exclusive_group(required=False)  # Changed to False
     g.add_argument("port", type=int, nargs="?", help="single port")
     g.add_argument("--ports", type=int, nargs="+", help="multi ports")
     p.add_argument("--force", action="store_true", help="skip confirm + safety")
@@ -91,6 +91,10 @@ def main():
             for pnum, pid, name in list_ports():
                 print(f"{pnum} -> {pid} ({name})")
         sys.exit(0)
+
+    # Check if we have ports to work with when not listing
+    if not args.port and not args.ports:
+        p.error("must specify a port or --ports when not using --list")
 
     ports = args.ports if args.ports else [args.port]
     for port in ports:
