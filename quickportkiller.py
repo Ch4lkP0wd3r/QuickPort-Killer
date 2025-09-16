@@ -32,22 +32,40 @@ def get_protected():
 def find_by_port(port):
     pids = []
     try:
-        for c in psutil.net_connections(kind="inet"):
-            if c.laddr.port == port and c.pid:
-                pids.append(c.pid)
+        connections = psutil.net_connections(kind="inet")
+    except psutil.AccessDenied:
+        print("Access denied - try running as admin/root")
+        sys.exit(1)
     except Exception as e:
         print("cant read connections:", e)
         sys.exit(1)
+        
+    for c in connections:
+        if (hasattr(c, 'laddr') and c.laddr and 
+            c.laddr.port == port and c.pid):
+            pids.append(c.pid)
     return list(set(pids))
 
 def list_ports():
     seen = set()
-    for c in psutil.net_connections(kind="inet"):
-        if c.status == "LISTEN" and c.pid and (c.laddr.port, c.pid) not in seen:
+    try:
+        connections = psutil.net_connections(kind="inet")
+    except psutil.AccessDenied:
+        print("Access denied - try running as admin/root to see all processes")
+        return
+    except Exception as e:
+        print(f"Error getting connections: {e}")
+        return
+        
+    for c in connections:
+        # Check if connection has local address and is listening
+        if (hasattr(c, 'laddr') and c.laddr and 
+            hasattr(c, 'status') and c.status == psutil.CONN_LISTEN and 
+            c.pid and (c.laddr.port, c.pid) not in seen):
             seen.add((c.laddr.port, c.pid))
             try:
                 yield c.laddr.port, c.pid, psutil.Process(c.pid).name()
-            except psutil.NoSuchProcess:
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
 
 def kill(pid, timeout=3, verbose=False):
@@ -70,7 +88,7 @@ def kill(pid, timeout=3, verbose=False):
 
 def main():
     p = argparse.ArgumentParser(description="kill proc using a port")
-    g = p.add_mutually_exclusive_group(required=False)  # Changed to False
+    g = p.add_mutually_exclusive_group(required=False)
     g.add_argument("port", type=int, nargs="?", help="single port")
     g.add_argument("--ports", type=int, nargs="+", help="multi ports")
     p.add_argument("--force", action="store_true", help="skip confirm + safety")
@@ -85,11 +103,18 @@ def main():
     out = []
 
     if args.list:
+        ports_found = list(list_ports())
+        if not ports_found:
+            print("No listening ports found (try running as admin/root)")
+            sys.exit(0)
+            
         if args.json:
-            print(json.dumps([{"port": p, "pid": pid, "name": n} for p, pid, n in list_ports()], indent=2))
+            print(json.dumps([{"port": p, "pid": pid, "name": n} for p, pid, n in ports_found], indent=2))
         else:
-            for pnum, pid, name in list_ports():
-                print(f"{pnum} -> {pid} ({name})")
+            print(f"{'Port':<8} {'PID':<8} Process")
+            print("-" * 30)
+            for pnum, pid, name in sorted(ports_found):
+                print(f"{pnum:<8} {pid:<8} {name}")
         sys.exit(0)
 
     # Check if we have ports to work with when not listing
